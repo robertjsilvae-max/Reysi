@@ -1,4 +1,4 @@
-<!doctype html><html lang="es" data-motion="full"><head><script>try{document.documentElement.dataset.motion=localStorage.getItem('ventas.motion')==='reduced'?'reduced':'full'}catch(e){}</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Dashboard Ejecutivo de Ventas · Aserradero Cojedes (v19)</title>
+<!doctype html><html lang="es" data-motion="full"><head><script>try{document.documentElement.dataset.motion=localStorage.getItem('ventas.motion')==='reduced'?'reduced':'full'}catch(e){}</script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Dashboard Ejecutivo de Ventas · Aserradero Cojedes (v20)</title>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
@@ -433,9 +433,20 @@ function Chart({items,fc=[],sel,onPick,total}){
  ${fc.map((p,j)=>html`<g key=${'f'+j} onMouseEnter=${()=>setHv(items.length+j)} onMouseLeave=${()=>setHv(null)}><rect x=${X(items.length+j)-bw/2} y=${Y(p.v)} width=${bw} height=${H-26-Y(p.v)} rx="4" fill="none" stroke="var(--gold)" strokeWidth="2" strokeDasharray="4 4"/><text x=${X(items.length+j)} y=${Y(p.v)-6} textAnchor="middle" className="sv">${sh(p.v)}</text><text x=${X(items.length+j)} y=${H-8} textAnchor="middle" className="sl">${p.l}</text></g>`)}
  </svg></div>`}
 const UL={M3:'M3',M2:'M2',ML:'ML',UND:'Unidad'},qf=x=>(+x||0).toLocaleString('es-VE',{maximumFractionDigits:2});
-const IDB={op:()=>new Promise((ok,no)=>{const r=indexedDB.open('ventas-db',3);r.onupgradeneeded=()=>{const d=r.result;['files','inv','cli'].forEach(n=>d.objectStoreNames.contains(n)||d.createObjectStore(n,{keyPath:'id'}))};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)}),
- run:async(m,f,st='files')=>{const db=await IDB.op();return new Promise((ok,no)=>{const t=db.transaction(st,m),q=f(t.objectStore(st));t.oncomplete=()=>{db.close();ok(q.result)};t.onerror=t.onabort=()=>no(t.error)})},
- all:()=>IDB.run('readonly',s=>s.getAll()),put:r=>IDB.run('readwrite',s=>s.put(r)),del:id=>IDB.run('readwrite',s=>s.delete(id))};
+const KEYP={files:'id',inv:'id',cli:'id',coa:'code',je:'seq',meta:'key'};
+const KVALL=async st=>{let out=[],from=0;for(;;){const {data,error}=await SBC.from('kv').select('value').eq('store',st).order('key').range(from,from+999);if(error)throw error;out=out.concat(data.map(x=>x.value));if(data.length<1000)break;from+=1000}return out};
+const kvRun=async(st,f)=>{const ops=[],q=f({getAll:()=>{const h={result:undefined};ops.push({op:'all',h});return h},put:v=>{ops.push({op:'put',v});return{}},add:v=>{ops.push({op:'add',v});return{}},delete:k=>{ops.push({op:'del',k});return{}},clear:()=>{ops.push({op:'clr'});return{}}});
+ let i=0;while(i<ops.length){const o=ops[i];
+  if(o.op==='put'){const rows=[];while(i<ops.length&&ops[i].op==='put'){rows.push(ops[i].v);i++}
+   for(let j=0;j<rows.length;j+=200){const {error}=await SBC.from('kv').upsert(rows.slice(j,j+200).map(v=>({store:st,key:String(v[KEYP[st]]),value:v})));if(error)throw new Error(error.message)}continue}
+  if(o.op==='add'){const {error}=await SBC.from('kv').insert({store:st,key:String(o.v[KEYP[st]]),value:o.v});if(error)throw new Error(error.code==='23505'?'Otro usuario guardó ese registro al mismo tiempo. Actualiza e inténtalo de nuevo.':error.message)}
+  else if(o.op==='del'){const {error}=await SBC.from('kv').delete().eq('store',st).eq('key',String(o.k));if(error)throw new Error(error.message)}
+  else if(o.op==='clr'){const {error}=await SBC.from('kv').delete().eq('store',st).neq('key','');if(error)throw new Error(error.message)}
+  else o.h.result=await KVALL(st);
+  i++}
+ return q&&q.result};
+const KVB={fn:{},t:{},on(st,f){(this.fn[st]=this.fn[st]||new Set()).add(f);return()=>this.fn[st].delete(f)},emit(st){clearTimeout(this.t[st]);this.t[st]=setTimeout(()=>(this.fn[st]||new Set()).forEach(f=>f()),250)}};
+const IDB={run:(m,f,st='files')=>kvRun(st,f),all:()=>IDB.run('readonly',s=>s.getAll()),put:r=>IDB.run('readwrite',s=>s.put(r)),del:id=>IDB.run('readwrite',s=>s.delete(id))};
 function UnitSel({v,set,un}){
  const U=['M3','M2','ML','UND'].filter(u=>un&&un.includes(u));
  if(!U.length)return null;
@@ -445,7 +456,7 @@ function Db({files,dbOk,act,onUse,onDel,onUp}){
  item=(id,name,d,sub,del)=>{const t=d.tx,f=[['Transacciones',t.length],['Facturas',new Set(t.map(x=>x[1])).size],['Clientes',d.cl.length],['Productos',d.pr.length],['Período',fd(t[0][0])+' – '+fd(t[t.length-1][0])],['Monto neto',$(t.reduce((s,x)=>s+x[4],0))],['Cantidades',d.un?'M3, M2, ML, Unidad':'No incluidas']];
   return html`<div key=${id} className=${'dbi'+(act===id?' on':'')}><div className="flex flex-wrap items-center gap-2"><${Ic} n="db"/><b className="mr-auto min-w-0" style=${{overflowWrap:'anywhere'}}>${name}</b>${act===id?html`<span className="bdg">En uso</span>`:html`<button type="button" className="btn" onClick=${()=>onUse(d,id)}>Usar</button>`}${del?html`<button type="button" className="btn" onClick=${()=>onDel(id)} aria-label=${'Eliminar '+name}><${Ic} n="x"/></button>`:null}</div><div className="mut text-sm">${sub}</div><div className="dbs">${f.map(([k,v])=>html`<div key=${k}><span className="mut text-sm">${k}</span><b>${v}</b></div>`)}</div></div>`};
  return html`<div className="card rounded-2xl p-4 grid gap-3"><div className="flex flex-wrap items-center gap-3"><h3 className="h3 mr-auto">Base de datos</h3>${onUp&&html`<button type="button" className="btn" onClick=${onUp}><${Ic} n="upload"/>Cargar archivo</button>`}</div>
- <div className="mut text-sm">${dbOk?'Los archivos que cargas se guardan solos en este navegador y se reabren la próxima vez. Se guarda la tabla ya procesada (Códigos 0 y 2), no el archivo original.':'Este navegador no permite guardar aquí: los archivos solo duran mientras la página esté abierta.'}</div>
+ <div className="mut text-sm">${dbOk?'Los archivos que cargas se guardan en la nube y los ve todo el equipo. Se guarda la tabla ya procesada (Códigos 0 y 2), no el archivo original.':'No se pudo guardar en la nube: revisa tu conexión o tus permisos.'}</div>
  ${item('base',D0.src,D0,'Incluido en la página',false)}${files.slice().sort((a,b)=>b.at-a.at).map(x=>item(x.id,x.name,x.data,sz(x.size)+' · guardado '+new Date(x.at).toLocaleString('es-VE')+' · '+x.kept+' de '+x.read+' filas con Código 0 y 2',true))}</div>`}
 const IVA=.16,TASA0=879.12,F0=6174,C0=9124,MNF=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],pad=(n,l)=>String(n).padStart(l,'0'),bs=x=>(+x||0).toLocaleString('es-VE',{minimumFractionDigits:2,maximumFractionDigits:2}),fdt=d=>d?d.split('-').reverse().join('/'):'',nv=x=>parseFloat(String(x).replace(',','.'))||0,today=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1,2)+'-'+pad(d.getDate(),2)};
 function mergeInv(d,L){
@@ -618,7 +629,7 @@ const TYN={'1':'activo','2':'pasivo','3':'patrimonio','4':'ingresos','5':'costos
 const mkAcc=(code,name,fl)=>{fl=fl||'';const t=TYN[code[0]],deb=t==='activo'||t==='costos'||t==='gastos',x=fl.includes('x');return{code,name,type:t,nature:(deb!==x)?'deudora':'acreedora',parent:code.includes('.')?code.slice(0,code.lastIndexOf('.')):null,postable:!fl.includes('g'),cash:fl.includes('c'),active:true}};
 const cmpC=(a,b)=>a.code<b.code?-1:a.code>b.code?1:0;
 const CDB=()=>new Promise((ok,no)=>{const r=indexedDB.open('contab-db',1);r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('coa',{keyPath:'code'});d.createObjectStore('je',{keyPath:'seq'});d.createObjectStore('meta',{keyPath:'key'})};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
-const cTx=async(st,md,fn)=>{const d=await CDB();return new Promise((ok,no)=>{const t=d.transaction(st,md),q=fn(t.objectStore(st));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error);t.onabort=()=>no(t.error)})};
+const cTx=(st,md,fn)=>kvRun(st,fn),cTxOld=async(st,md,fn)=>{const d=await CDB();return new Promise((ok,no)=>{const t=d.transaction(st,md),q=fn(t.objectStore(st));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>no(t.error);t.onabort=()=>no(t.error)})};
 const cGet=st=>cTx(st,'readonly',s=>s.getAll()),cPut=(st,v)=>cTx(st,'readwrite',s=>{[].concat(v).forEach(x=>s.put(x))}),cAdd=(st,v)=>cTx(st,'readwrite',s=>s.add(v)),cClr=st=>cTx(st,'readwrite',s=>s.clear());
 const DEFMETA={startDate:'2026-11-01',rate:879.12,empresa:'Aserradero Cojedes',rif:'J-07509192-2',contador:'',cpc:'',rep:'',log:[]};
 const cDel=(st,k)=>cTx(st,'readwrite',s=>s.delete(k));
@@ -741,7 +752,8 @@ function Acc({tab,can}){
  const noteTimer=useRef(),note=m=>{setMsg(m);clearTimeout(noteTimer.current);noteTimer.current=setTimeout(()=>setMsg(''),4500)};
  useEffect(()=>()=>clearTimeout(noteTimer.current),[]);
  useEffect(()=>{(async()=>{try{let c=await cGet('coa');if(!c.length){c=PLAN.map(x=>mkAcc(x[0],x[1],x[2]));await cPut('coa',c)}const j=(await cGet('je')).sort((a,b)=>a.seq-b.seq),mm={...DEFMETA};(await cGet('meta')).forEach(x=>{mm[x.key]=x.value});setCoa(c.sort(cmpC));setJe(j);setMeta(mm)}catch(e){setBad(true);setCoa(PLAN.map(x=>mkAcc(x[0],x[1],x[2])))}})()},[]);
- const setM=async(k,v)=>{setMeta(m=>({...m,[k]:v}));try{await cPut('meta',{key:k,value:v})}catch(e){note('No se pudo guardar en el navegador.')}};
+ useEffect(()=>{const a=KVB.on('coa',()=>cGet('coa').then(c=>{if(c.length)setCoa(c.sort(cmpC))}).catch(()=>{})),b=KVB.on('je',()=>cGet('je').then(j=>setJe(j.sort((x,y)=>x.seq-y.seq))).catch(()=>{})),c=KVB.on('meta',()=>cGet('meta').then(l=>{const mm={...DEFMETA};l.forEach(x=>{mm[x.key]=x.value});setMeta(mm)}).catch(()=>{}));return()=>{a();b();c()}},[]);
+ const setM=async(k,v)=>{setMeta(m=>({...m,[k]:v}));try{await cPut('meta',{key:k,value:v})}catch(e){note('No se pudo guardar en la nube.')}};
  const jeS=[...je].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.seq-b.seq);
  const check=e=>{const L=e.lines.filter(l=>l.acc&&(l.dr||l.cr)),sd=L.reduce((a,l)=>a+l.dr,0),sc=L.reduce((a,l)=>a+l.cr,0),er=[];
   if(L.length<2)er.push('Se necesitan al menos dos líneas.');
@@ -752,7 +764,7 @@ function Acc({tab,can}){
   return[...new Set(er)]};
  const clean=e=>e.lines.filter(l=>l.acc&&(l.dr||l.cr)).map(l=>({acc:l.acc,dr:l.dr||0,cr:l.cr||0}));
  const post=async e=>{if(!cw)return['Tu cuenta no tiene permiso para registrar asientos.'];const er=check(e);if(er.length)return er;const seq=je.reduce((n,x)=>Math.max(n,x.seq),0)+1,rec={seq,date:e.date,period:e.date.slice(0,7),source:e.source,ref:e.ref||'',desc:e.desc||'',rate:e.rate||meta.rate,lines:clean(e),at:new Date().toISOString()};
-  try{await cAdd('je',rec);setJe(x=>[...x,rec]);return[]}catch(x){return['No se pudo guardar en el navegador: '+(x.message||x)]}};
+  try{await cAdd('je',rec);setJe(x=>[...x,rec]);return[]}catch(x){return['No se pudo guardar en la nube: '+(x.message||x)]}};
  const snap=e=>({date:e.date,ref:e.ref,desc:e.desc,lines:e.lines}),addLog=x=>setM('log',[{at:new Date().toISOString(),...x},...(meta.log||[])].slice(0,300));
  const upd=async(seq,d)=>{if(!cw)return['Tu cuenta no tiene permiso para modificar asientos.'];const er=check(d),old=je.find(x=>x.seq===seq);if(!old)return['El asiento ya no existe.'];if(er.length)return er;
   const rec={...old,date:d.date,period:d.date.slice(0,7),ref:d.ref||'',desc:d.desc||'',rate:d.rate||old.rate,lines:clean(d),editedAt:new Date().toISOString()};
@@ -1013,11 +1025,12 @@ function App(){
  const useDs=(d,id)=>{setData(d);setAct(id);setSel({});setQ('');setUnit('all');setFrom(d.tx[0][0]);setTo(d.tx[d.tx.length-1][0]);try{localStorage.setItem('ventas.act',id)}catch(e){}},
   save=async(file,r)=>{const id=file.name+'#'+file.size;useDs(r.data,id);try{await IDB.put({id,name:file.name,size:file.size,at:Date.now(),read:r.read,kept:r.kept,data:r.data});setFiles(await IDB.all())}catch(e){setDbOk(false)}},
   del=async id=>{try{await IDB.del(id);setFiles(await IDB.all())}catch(e){}if(act===id)useDs(D0,'base')},
-  issue=async r=>{setIssued(l=>[...l,r]);setTo(t=>t<r.date?r.date:t);setFrom(t=>t>r.date?r.date:t);try{await IDB.run('readwrite',s=>s.put(r),'inv')}catch(e){setDbOk(false)}},
+  issue=async r=>{setIssued(l=>[...l,r]);setTo(t=>t<r.date?r.date:t);setFrom(t=>t>r.date?r.date:t);try{await IDB.run('readwrite',s=>s.add(r),'inv')}catch(e){setDbOk(false);IDB.run('readonly',s=>s.getAll(),'inv').then(setIssued).catch(()=>{})}},
   onPf=(name,fn)=>{const k=name.trim().toUpperCase(),n={...fn(pfsR.current[k]||{}),id:k,name:k};pfsR.current={...pfsR.current,[k]:n};setPfs(pfsR.current);IDB.run('readwrite',s=>s.put(n),'cli').catch(()=>{})};
  useEffect(()=>{IDB.all().then(l=>{setFiles(l);let id=null;try{id=localStorage.getItem('ventas.act')}catch(e){}const f=l.find(x=>x.id===id);if(f)useDs(f.data,f.id)}).catch(()=>setDbOk(false))},[]);
  useEffect(()=>{IDB.run('readonly',s=>s.getAll(),'inv').then(l=>setIssued(l)).catch(()=>{})},[]);
  useEffect(()=>{IDB.run('readonly',s=>s.getAll(),'cli').then(l=>{const m={};l.forEach(x=>{m[x.id]=x});pfsR.current=m;setPfs(m)}).catch(()=>{})},[]);
+ useEffect(()=>{const a=KVB.on('files',()=>IDB.all().then(setFiles).catch(()=>{})),b=KVB.on('inv',()=>IDB.run('readonly',s=>s.getAll(),'inv').then(setIssued).catch(()=>{})),c=KVB.on('cli',()=>IDB.run('readonly',s=>s.getAll(),'cli').then(l=>{const m={};l.forEach(x=>{m[x.id]=x});pfsR.current=m;setPfs(m)}).catch(()=>{}));return()=>{a();b();c()}},[]);
  const reset=()=>{useDs(D0,'base');setSel({});setQ('');setFrom(D0.tx[0][0]);setTo(D0.tx[D0.tx.length-1][0]);setPend(null);setNote({t:'ok',m:'Datos originales restaurados.'})};
  useEffect(()=>{document.documentElement.dataset.motion=mot;try{localStorage.setItem('ventas.motion',mot)}catch(e){}},[mot]);
   useEffect(()=>{if(!cfg)return;const k=e=>{if(e.key==='Escape')setCfg(false)},c=e=>{if(!e.target.closest('.cfg,.cfgbtn,.cff'))setCfg(false)};window.addEventListener('keydown',k);document.addEventListener('pointerdown',c);return()=>{window.removeEventListener('keydown',k);document.removeEventListener('pointerdown',c)}},[cfg]);
@@ -1158,6 +1171,7 @@ function Root(){
   if(p&&p.estado==='activo'){setDs('loading');const {data,error}=await SBC.from('ventas_datos').select('datos').eq('id','principal').maybeSingle();
    if(error)setDs('err');else if(data&&data.datos&&data.datos.tx&&data.datos.tx.length){D0=data.datos;setDs('ok')}else setDs('empty')}};
  useEffect(()=>{if(!sess)return;load();const ch=SBC.channel('root-'+sess.user.id).on('postgres_changes',{event:'*',schema:'public',table:'profiles',filter:'id=eq.'+sess.user.id},load).subscribe();return()=>{SBC.removeChannel(ch)}},[sess&&sess.user.id]);
+ useEffect(()=>{if(ds!=='ok')return;const ch=SBC.channel('kv-live').on('postgres_changes',{event:'*',schema:'public',table:'kv'},p=>{const r=p.new&&p.new.store?p.new:p.old;if(r&&r.store)KVB.emit(r.store)}).subscribe(st=>{if(st==='SUBSCRIBED')Object.keys(KEYP).forEach(k=>KVB.emit(k))});return()=>{SBC.removeChannel(ch)}},[ds]);
  if(!SBC)return html`<div className="auth"><div className="acard"><h1>Reisy</h1><p className="amsg er">No se pudo cargar el servicio de acceso. Revisa tu conexión y recarga.</p></div></div>`;
  if(ph==='boot')return html`<${Splash}/>`;
  if(ph==='auth')return html`<${AuthScreen}/>`;
